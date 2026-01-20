@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>TRPG 防護システム管理</title>
+<style>
+body {
+  background:#0f172a;
+  color:#e5e7eb;
+  font-family: sans-serif;
+  padding:20px;
+}
+section {
+  background:#1e293b;
+  padding:16px;
+  border-radius:8px;
+  margin-bottom:16px;
+}
+input, select, button {
+  background:#334155;
+  color:white;
+  border:none;
+  padding:6px;
+  border-radius:4px;
+}
+button { cursor:pointer; }
+.warning {
+  background:#7f1d1d;
+  padding:10px;
+  border-radius:6px;
+  margin-bottom:10px;
+}
+.grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap:12px;
+}
+</style>
+</head>
+<body>
+
+<h1>防護システム管理</h1>
+
+<div id="warnings"></div>
+
+<section>
+<h2>HP</h2>
+最大HP <input type="number" id="maxHP" value="100"><br>
+現在HP <span id="currentHP">100</span>
+</section>
+
+<section>
+<h2>防護点</h2>
+鎧 <input type="number" id="armor" value="0"><br>
+盾 <input type="number" id="shield" value="0"><br>
+追加防護 <input type="number" id="additional" value="0"><br>
+<hr>
+初期防護点: <span id="initialDefense">0</span><br>
+現在防護点: <span id="currentDefense">0</span><br>
+増加防護点: <span id="increasedDefense">0</span>
+</section>
+
+<section>
+<h2>意志の力</h2>
+<span id="willPower">0</span>
+</section>
+
+<section>
+<h2>ダメージ処理</h2>
+物理ダメージ <input id="physicalDamage" placeholder="10,15"><br>
+属性
+<select id="damageAttr"></select><br>
+<button onclick="applyPhysical()">物理適用</button>
+<hr>
+魔法ダメージ <input id="magicDamage" placeholder="20,25"><br>
+<label><input type="checkbox" id="saving"> セービング(-4)</label>
+<label><input type="checkbox" id="abyss"> アビス(-1)</label><br>
+<button onclick="applyMagic()">魔法適用</button>
+</section>
+
+<section>
+<h2>能力習得</h2>
+能力
+<select id="abilitySelect"></select><br>
+属性
+<select id="abilityAttr"></select><br>
+X値 <input type="number" id="xValue" value="1"><br>
+<button onclick="acquire()">習得</button>
+</section>
+
+<section>
+<h2>習得済み能力</h2>
+<div id="abilities"></div>
+</section>
+
+<script>
+const ATTRIBUTES = ['なし','炎','水・氷','土','雷','風','弾空','衝撃','純エネルギー','精神効果','毒','病気','呪い'];
+
+const ABILITIES = {
+  '属性軽減': { cost:x=>2*x, type:'attribute', maxMode:true },
+  '属性無効': { cost:24, type:'attribute' },
+  '再生': { cost:x=>4*x },
+  '魔法装甲': { cost:x=>4*x, maxMode:true },
+  '追加装甲': { cost:x=>3*x }
+};
+
+let state = {
+  maxHP:100,
+  currentHP:100,
+  armor:0,
+  shield:0,
+  additional:0,
+  increased:0,
+  will:0,
+  abilities:{}
+};
+
+const qs = id => document.getElementById(id);
+
+ATTRIBUTES.forEach(a=>{
+  qs('damageAttr').innerHTML += `<option>${a}</option>`;
+  if(a!=='なし') qs('abilityAttr').innerHTML += `<option>${a}</option>`;
+});
+Object.keys(ABILITIES).forEach(a=>{
+  qs('abilitySelect').innerHTML += `<option>${a}</option>`;
+});
+
+function updateDerived(){
+  const base = state.armor + state.shield + state.additional;
+  const current = base + state.increased;
+  qs('initialDefense').textContent = base;
+  qs('currentDefense').textContent = current;
+  qs('increasedDefense').textContent = state.increased;
+  qs('currentHP').textContent = state.currentHP;
+  qs('willPower').textContent = state.will;
+}
+
+function warn(msg){
+  qs('warnings').innerHTML = `<div class="warning">${msg}</div>`;
+  setTimeout(()=>qs('warnings').innerHTML='',3000);
+}
+
+function handleMaxHP(){
+  const newMax = Number(qs('maxHP').value);
+  const old = state.maxHP;
+  state.maxHP = newMax;
+  if(newMax <= state.currentHP || state.currentHP === old){
+    state.currentHP = newMax;
+  }
+  updateDerived();
+}
+
+qs('maxHP').onchange = handleMaxHP;
+qs('armor').onchange = e => { state.armor=+e.target.value; updateDerived(); };
+qs('shield').onchange = e => { state.shield=+e.target.value; updateDerived(); };
+qs('additional').onchange = e => { state.additional=+e.target.value; updateDerived(); };
+
+function acquire(){
+  const name = qs('abilitySelect').value;
+  if(!name) return;
+  const ability = ABILITIES[name];
+  const x = +qs('xValue').value;
+  const attr = qs('abilityAttr').value;
+  const cost = typeof ability.cost==='function' ? ability.cost(x) : ability.cost;
+  if(cost > state.will){ warn('意志の力不足'); return; }
+
+  const key = attr ? `${name}_${attr}` : name;
+  const cur = state.abilities[key] || {count:0,max:0,total:0};
+
+  if(ability.maxMode && x<=cur.max){
+    warn(`現在の最大値${cur.max}以下は無効`);
+    return;
+  }
+
+  state.abilities[key] = {
+    count:cur.count+1,
+    max:Math.max(cur.max,x),
+    total:Math.max(cur.max,x),
+    attr
+  };
+  if(name==='追加装甲'){
+    state.increased += x;
+  }
+  state.will -= cost;
+  renderAbilities();
+  updateDerived();
+}
+
+function renderAbilities(){
+  const out=[];
+  Object.entries(state.abilities).forEach(([k,v])=>{
+    out.push(`<div>${k} 回数:${v.count} 最大:${v.max}</div>`);
+  });
+  qs('abilities').innerHTML = out.join('');
+}
+
+function applyDamage(list,isMagic){
+  list.split(/[,\s]+/).map(Number).forEach(d=>{
+    let dmg=d;
+    const defense = state.armor+state.shield+state.additional+state.increased;
+    if(!isMagic){
+      dmg = Math.max(0,d-defense);
+      state.increased += dmg>0?2:0;
+    }
+    state.currentHP = Math.max(0,state.currentHP-dmg);
+  });
+  updateDerived();
+}
+
+function applyPhysical(){
+  applyDamage(qs('physicalDamage').value,false);
+  qs('physicalDamage').value='';
+}
+function applyMagic(){
+  applyDamage(qs('magicDamage').value,true);
+  qs('magicDamage').value='';
+}
+
+updateDerived();
+</script>
+</body>
+</html>
